@@ -1,0 +1,92 @@
+<html>
+    <head>
+        <title>Stardisk PHP Radio</title>
+        <style>
+            .block{
+                width: 300px;
+                border: 1px solid #aaa;
+                background: #ccc;
+                margin: 20px 0;
+                padding: 5px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Stardisk PHP Radio</h1>
+        <a href="?playlist" download="listen.m3u">Download file for media players</a>
+        <div class="block" id="info">
+            <p>Now playing: <span class="nowPlaying"><?=$_RESPONSE['nowPlaying']?></span></p>
+            <?php if($this->debug):?>
+                <p>File: <span class="File"><?=$_RESPONSE['File']?></span></p>
+                <p>Chunk: <span class="Chunk"><?=$_RESPONSE['Chunk']?></span> of <span class="TotalChunks"><?=$_RESPONSE['TotalChunks']?></span></p>
+                <p>Last updated: <span class="LastUpdated"><?=$_RESPONSE['LastUpdated']?></span></p>
+                <p>Current Time: <span class="CurrentTime"><?=$_RESPONSE['CurrentTime']?></span></p>
+            <?php endif;?>
+        </div>
+        <div class="block">
+            <button id="play">Play</button>
+            <span class="playing"></span>
+        </div>
+        <div class="block">
+            <h3>Playing history</h3>
+            <ul id="history">
+                <?php if(is_array($_RESPONSE['History'])): ?>
+                    <?php foreach($_RESPONSE['History'] as $item):?>
+                        <li><?=$item?></li>
+                    <?php endforeach;?>
+                <?php else:?>
+                    <li>[history is empty]</li>
+                <?php endif;?>
+            </ul>
+        </div>
+
+        <script>
+            var playButton = document.getElementById('play');
+            var audio = new Audio();
+            audio.addEventListener('canplay', function(){   this.play();});
+            audio.addEventListener('error', function(e){
+                alert('error'); console.log(e); console.log(e.name, e.message); playButton.style.display = '';
+            });
+            playButton.onclick = function(){
+                audio.src = '/radio/?play';
+                this.style.display = 'none';
+
+                var playingTime = document.querySelector('.playing');
+                setInterval(function(){
+                    playingTime.innerText = addZeros(Math.floor(audio.currentTime / 60), 3)+':'+addZeros(Math.floor(audio.currentTime % 60),2);
+                },1000);
+            };
+            var xhr = new XMLHttpRequest(), info = document.getElementById('info');
+            xhr.onreadystatechange = function(){
+                if(xhr.readyState == 4){
+                    var response = JSON.parse(xhr.responseText);
+                    for(var key in response){
+                        if(key == 'History' && response[key]){
+                            var history = document.getElementById('history'), html = '';
+                            response[key].forEach(function(historyItem){
+                                html +='<li>'+historyItem+'</li>';
+                            });
+                            history.innerHTML = html;
+                        }
+                        else{
+                            info.querySelector('.'+key).textContent = response[key];
+                        }
+                    }
+                }
+            };
+
+            setInterval(function(){
+                xhr.open('GET','/radio/?json');
+                xhr.send();
+            }, 1000);
+
+            function addZeros(number, lengthWithZeros){
+                var numberAsString = String(number);
+                var requiredZeros = lengthWithZeros - numberAsString.length;
+                if(requiredZeros > 0){ return '0'.repeat(requiredZeros) + numberAsString;}
+                else{ return numberAsString;}
+            }
+
+        </script>
+    </body>
+</html>
