@@ -134,7 +134,11 @@ class radio{
         $this->updateHistory($title);
         $totalChunks = ceil($mp3file->_fileSize / CHUNK_SIZE);              //всего чанков в файле
         $exceedSeconds = floor($mp3file->duration - $totalChunks);          //разница между длительностью и числом чанков
-        $oneSecSleepAfterChunkNumber = floor($totalChunks / $exceedSeconds);//определяем после какого чанка (например, после каждого 50-го) вставляем еще один сон 1 сек
+        if($exceedSeconds > 0){
+            $oneSecSleepAfterChunkNumber = floor($totalChunks / $exceedSeconds);//определяем после какого чанка (например, после каждого 50-го) вставляем еще один сон 1 сек
+        }
+        else{ $oneSecSleepAfterChunkNumber = 0;}
+
 
         //открываем файл
         $fpOrigin = fopen($selectedMP3, 'rb');
@@ -182,7 +186,7 @@ class radio{
                 }
             //}
             //спим секунду до отправки следующего чанка
-            if($chunkNumber > 0 and $chunkNumber % $oneSecSleepAfterChunkNumber == 0){ sleep(2); $exceedSeconds--;}
+            if($chunkNumber > 0 and $oneSecSleepAfterChunkNumber > 0 and $chunkNumber % $oneSecSleepAfterChunkNumber == 0){ sleep(2); $exceedSeconds--;}
             else {sleep(1);}
             //если запрошен переход на следующий трек
             if($nextTrack = $this->shmopRead($this->forceNextTrack)){
