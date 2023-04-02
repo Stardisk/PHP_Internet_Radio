@@ -19,9 +19,16 @@ class radio{
     private $withMetadata = false; //клиент запросил метаданные
     private $chunkCounter = 0;  // общий счетчик чанков (для корректной отправки метаданных внутри потока)
 
+    private $intervalBetweenPackets;
+    private $actualChunkSize;
+
     private $debug = false;
 
     public function __construct($outside = false){
+        $this->intervalBetweenPackets = (isset($_GET['i'])) ? (float)($_GET['i']) : 1;
+
+        $this->actualChunkSize = CHUNK_SIZE * $this->intervalBetweenPackets;
+
         $this->nowPlaying = shmop_open(100000, 'c', 0644, 512);
         $this->chunkNumber = shmop_open(100001, 'c', 0644, 4);
         $this->lastUpdate = shmop_open(100002, 'c', 0644, 10);
@@ -29,6 +36,7 @@ class radio{
         $this->totalChunks = shmop_open(100004, 'c', 0644, 4);
         $this->forceNextTrack = shmop_open(100005, 'c', 0644, 512);
         $this->radioHistory = shmop_open(100006, 'c', 0644, 1024);
+        $this->prerollSent = false;
 
         $this->debug = config::getSetting('debug');
         if(isset($_GET['refresh'])){    $this->refreshTrackList();}
@@ -60,10 +68,10 @@ class radio{
                     header('icy-name: Stardisk PHP Radio Server');
                     header("icy-br: 128");
                     if(isset($incomingHeaders['Icy-MetaData'])){
-                        header ("icy-metaint: ".CHUNK_SIZE);
+                        header ("icy-metaint: ".$this->actualChunkSize*5);
                         $this->withMetadata = true;
                     }
-                    sleep(1);
+                    usleep(100000);
                     flush();
                     $this->play($this->shmopRead($this->forceNextTrack));
                 }
@@ -132,13 +140,7 @@ class radio{
             $title = basename($selectedMP3);
         }
         $this->updateHistory($title);
-        $totalChunks = ceil($mp3file->_fileSize / CHUNK_SIZE);              //всего чанков в файле
-        $exceedSeconds = floor($mp3file->duration - $totalChunks);          //разница между длительностью и числом чанков
-        if($exceedSeconds > 0){
-            $oneSecSleepAfterChunkNumber = floor($totalChunks / $exceedSeconds);//определяем после какого чанка (например, после каждого 50-го) вставляем еще один сон 1 сек
-        }
-        else{ $oneSecSleepAfterChunkNumber = 0;}
-
+        $totalChunks = ceil($mp3file->_fileSize / $this->actualChunkSize);              //всего чанков в файле
 
         //открываем файл
         $fpOrigin = fopen($selectedMP3, 'rb');
@@ -152,26 +154,47 @@ class radio{
             $chunkNumber = 0;
         }
         //если это просто клиент, то начинаем читать файл с того места, где сейчас слушает мастер
-        else{ fseek($fpOrigin, CHUNK_SIZE * $chunkNumber);}
+        else{
+            if($chunkNumber > 5){ $chunkNumber-=5;}
+            fseek($fpOrigin, $this->actualChunkSize * $chunkNumber);
+        }
+
+        $exceedSeconds = floor($mp3file->duration - ($totalChunks * $this->intervalBetweenPackets));          //разница между длительностью и числом чанков
+        if($exceedSeconds > 0){
+            $oneSecSleepAfterChunkNumber = floor($totalChunks / $exceedSeconds);//определяем после какого чанка (например, после каждого 50-го) вставляем еще один сон 1 сек
+        }
+        else{ $oneSecSleepAfterChunkNumber = 0;}
+
         //посылаем файл по чанкам
-        //fread($fpOrigin, CHUNK_SIZE * 4 - 4); $chunkNumber+=4; $this->chunkCounter+=4;*/
         while(!feof($fpOrigin)){
-            //читаем чанк
-            $buffer = fread($fpOrigin, CHUNK_SIZE);
-            //увеличиваем счетчики чанков
-            $chunkNumber++; $this->chunkCounter++;
-            //если до конца остается совсем немного чанков
-            if($totalChunks - $chunkNumber < 5){
-                //проверяем его размер
-                $bufferLength = strlen($buffer);
-                //если размер чанка меньше стандартного, добиваем недостающее нулями, ибо все чанки должны быть одинакового размера
-                if($bufferLength < CHUNK_SIZE){  $buffer .= str_repeat("\xff", CHUNK_SIZE - $bufferLength);}
+            if(!$this->prerollSent){
+                $buffer = fread($fpOrigin, $this->actualChunkSize*5);
+                $chunkNumber+=5;
+                $this->chunkCounter+=5;
+                echo $buffer;
+                if($this->withMetadata){
+                    $debug = ($this->debug) ? ' ('.$chunkNumber.'/'.$this->shmopRead($this->totalChunks).', d: '.floor($mp3file->duration).', s: '.$exceedSeconds.', t: '.$this->chunkCounter.')' : '';
+                    $this->setTitle($title.$debug);
+                }
+                $this->prerollSent = true;
             }
-            //посылаем чанк клиенту
-            echo $buffer;
-            flush();
-            //если номер чанка кратен 5, обновляем статус на сервере и посылаем метаданные
-            //if($this->chunkCounter % 5 == 0){
+            else{
+                //читаем чанк
+                $buffer = fread($fpOrigin, $this->actualChunkSize);
+                //увеличиваем счетчики чанков
+                $chunkNumber++; $this->chunkCounter++;
+                //если до конца остается совсем немного чанков
+                if($totalChunks - $chunkNumber < 5){
+                    //проверяем его размер
+                    $bufferLength = strlen($buffer);
+                    //если размер чанка меньше стандартного, добиваем недостающее нулями, ибо все чанки должны быть одинакового размера
+                    if($bufferLength < $this->actualChunkSize){  $buffer .= str_repeat("\xff", $this->actualChunkSize - $bufferLength);}
+                }
+                //посылаем чанк клиенту
+                echo $buffer;
+                flush();
+                //если номер чанка кратен 5, обновляем статус на сервере и посылаем метаданные
+                //if($this->chunkCounter % 5 == 0){
                 //если статус радио не обновлялся более 5 секунд, теперь этот клиент - мастер
                 if(!$this->isMaster and (time() - $this->shmopRead($this->lastUpdate) > 5)){ $this->isMaster = true;}
                 //если клиент - мастер -он обновляет общие данные
@@ -180,26 +203,28 @@ class radio{
                     $this->shmopWrite($this->lastUpdate, time());
                 }
                 //если клиент запросил метаданные, посылаем их ему
-                if($this->withMetadata){
+                if($this->chunkCounter % 5 == 0 and $this->withMetadata){
                     $debug = ($this->debug) ? ' ('.$chunkNumber.'/'.$this->shmopRead($this->totalChunks).', d: '.floor($mp3file->duration).', s: '.$exceedSeconds.', t: '.$this->chunkCounter.')' : '';
                     $this->setTitle($title.$debug);
                 }
-            //}
-            //спим секунду до отправки следующего чанка
-            if($chunkNumber > 0 and $oneSecSleepAfterChunkNumber > 0 and $chunkNumber % $oneSecSleepAfterChunkNumber == 0){ sleep(2); $exceedSeconds--;}
-            else {sleep(1);}
-            //если запрошен переход на следующий трек
-            if($nextTrack = $this->shmopRead($this->forceNextTrack)){
-                //закрываем текущий файл и играем запрошенный
-                fclose($fpOrigin);
-                $this->play($nextTrack);
-                return;
+                //}
+                //спим секунду до отправки следующего чанка
+                if($chunkNumber > 0 and $oneSecSleepAfterChunkNumber > 0 and $chunkNumber % $oneSecSleepAfterChunkNumber == 0){ sleep(2); $exceedSeconds--;}
+                else {usleep($this->intervalBetweenPackets * 1000000);}
+                //если запрошен переход на следующий трек
+                if($nextTrack = $this->shmopRead($this->forceNextTrack)){
+                    //закрываем текущий файл и играем запрошенный
+                    fclose($fpOrigin);
+                    $this->play($nextTrack);
+                    return;
+                }
             }
         }
+
         //дослали файл чанками - закрыли
         fclose($fpOrigin);
         //если сон после воспроизведения трека больше нуля, то спим это время, т.к. кол-во чанков обычно не равно числу секунд файла и отличается на 3-9
-        if($exceedSeconds > 0) sleep($exceedSeconds);
+       // if($exceedSeconds > 0) sleep($exceedSeconds);
         //играем следующий трек
         $this->play();
     }
