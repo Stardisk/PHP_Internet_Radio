@@ -15,6 +15,7 @@ class radio{
     private $fileList;          //список файлов (используется при обновлении медиатеки)
     public $tracks;             //массив файлов (из него выбираются треки для воспроизведения
     public $forceNextTrack;     //трек, заданный из телеграм-бота
+    public $deleteTrack;        //трек на удаление из телеграм-бота
     private $isMaster = false;  //данный клиент - мастер (может менять треки при их окончании)
     private $withMetadata = false; //клиент запросил метаданные
     private $chunkCounter = 0;  // общий счетчик чанков (для корректной отправки метаданных внутри потока)
@@ -36,6 +37,7 @@ class radio{
         $this->totalChunks = shmop_open(100004, 'c', 0644, 4);
         $this->forceNextTrack = shmop_open(100005, 'c', 0644, 512);
         $this->radioHistory = shmop_open(100006, 'c', 0644, 1024);
+        $this->deleteTrack = shmop_open(100007, 'c', 0644, 2);
         $this->prerollSent = false;
 
         $this->debug = config::getSetting('debug');
@@ -79,10 +81,10 @@ class radio{
         }
     }
 
-    private function refreshTrackList(){
+    private function refreshTrackList($standalone = true){
         $this->listFolderFiles(config::getSetting('audioFiles'));
         file_put_contents('fileList.txt', substr($this->fileList, 0, -1));
-        echo 'done'; exit;
+        if($standalone){ echo 'done'; exit;}
     }
 
     private function listFolderFiles($dir){
@@ -167,6 +169,18 @@ class radio{
 
         //посылаем файл по чанкам
         while(!feof($fpOrigin)){
+            if($this->shmopRead($this->deleteTrack)){
+                $this->shmopWrite($this->deleteTrack, '');
+                fclose($fpOrigin);
+                usleep(10000);
+                unlink($this->shmopRead($this->nowPlaying));
+                usleep(10000);
+                $this->refreshTrackList(false);
+                usleep(10000);
+                $this->play();
+                return;
+            }
+
             if(!$this->prerollSent){
                 $buffer = fread($fpOrigin, $this->actualChunkSize*5);
                 $chunkNumber+=5;

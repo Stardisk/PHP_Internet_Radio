@@ -43,18 +43,29 @@
         <script>
             var playButton = document.getElementById('play');
             var audio = new Audio();
+            var updateTimeInterval;
             audio.addEventListener('canplay', function(){   this.play();});
             audio.addEventListener('error', function(e){
                 alert('error'); console.log(e); console.log(e.name, e.message); playButton.style.display = '';
             });
             playButton.onclick = function(){
-                audio.src = '/radio/?play';
-                this.style.display = 'none';
+                if(!this.classList.contains('stop')){
+                    audio.src = '/radio/?play';
+                    this.classList.add('stop');
+                    this.textContent = 'Stop';
+                    getStatus();
 
-                var playingTime = document.querySelector('.playing');
-                setInterval(function(){
-                    playingTime.innerText = addZeros(Math.floor(audio.currentTime / 60), 3)+':'+addZeros(Math.floor(audio.currentTime % 60),2);
-                },1000);
+                    var playingTime = document.querySelector('.playing');
+                    updateTimeInterval = setInterval(function(){
+                        playingTime.innerText = addZeros(Math.floor(audio.currentTime / 60), 3)+':'+addZeros(Math.floor(audio.currentTime % 60),2);
+                    },1000);
+                }
+                else{
+                    audio.pause();
+                    clearInterval(updateTimeInterval);
+                    location.reload();
+                }
+
             };
             var xhr = new XMLHttpRequest(), info = document.getElementById('info');
             xhr.onreadystatechange = function(){
@@ -74,17 +85,20 @@
                     }
                 }
             };
+            if(location.search === '?often'){ setInterval(getStatus, 1000);}
+            else{ setInterval(getStatus, 5000);}
 
-            setInterval(function(){
-                xhr.open('GET','/radio/?json');
-                xhr.send();
-            }, 1000);
 
             function addZeros(number, lengthWithZeros){
                 var numberAsString = String(number);
                 var requiredZeros = lengthWithZeros - numberAsString.length;
                 if(requiredZeros > 0){ return '0'.repeat(requiredZeros) + numberAsString;}
                 else{ return numberAsString;}
+            }
+
+            function getStatus(){
+                xhr.open('GET','/radio/?json');
+                xhr.send();
             }
 
         </script>
