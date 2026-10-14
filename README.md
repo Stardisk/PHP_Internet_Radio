@@ -22,3 +22,9 @@ Open **config.php** and change the next parameters:<br/><br/>
 `audioFiles` - the path to folder with your audio. All inner folders will be processed. Run script with GET-parameter ?refresh to scan folder.<br/><br/>
 `debug` - this parameter will show you debugging info in the interface. Also the script will send debug info in stream metadata after the title of current track in format `123/456, d: 255, s: 4, t: 211`, which means "current chunk number / total chunks in current file, **d**uration of current file, **s**leep pauses remained, **t**otal chunks sent to you since your connection".<br/><br/>
 `locale` - specify locale for supporting non-standard alphabets (such as cyrillic and etc.)
+
+## License & Attribution
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
+
+### Third-Party Code
+- File `mp3info.php` contains code from [wapmorgan](https://github.com/wapmorgan/Mp3Info), licensed under LGPL-3.0.
