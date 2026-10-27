@@ -58,11 +58,14 @@ class radio{
                     header('Content-type: text/json');
                     echo json_encode($_RESPONSE); exit;
                 }
-                else{   include('index.phtml');}
+                else{
+                    $_RESPONSE['FilesInLibrary'] = (int)@file_get_contents(__DIR__.'/fileCount.txt');
+                    include('index.phtml');
+                }
             }
             else{
                 $incomingHeaders = array_change_key_case(getallheaders());
-                $this->tracks = explode(PHP_EOL,file_get_contents($_SERVER['DOCUMENT_ROOT'].'/radio/fileList.txt'));
+                $this->tracks = explode(PHP_EOL,file_get_contents(__DIR__.'/fileList.txt'));
                 if(!$outside){
                     header('Connection: Keep-Alive');
                     header('Content-type: audio/mpeg');
@@ -87,7 +90,9 @@ class radio{
 
     private function refreshTrackList($standalone = true){
         $this->listFolderFiles(config::getSetting('audioFiles'));
-        file_put_contents('fileList.txt', substr($this->fileList, 0, -1));
+        $fileList = substr($this->fileList ?? '', 0, -1);
+        file_put_contents('fileList.txt', $fileList);
+        file_put_contents('fileCount.txt', $fileList === '' ? 0 : count(explode(PHP_EOL, $fileList)));
         if($standalone){ echo 'done'; exit;}
     }
 
@@ -179,6 +184,7 @@ class radio{
                 unlink($this->shmopRead($this->nowPlaying));
                 usleep(10000);
                 $this->refreshTrackList(false);
+                $this->tracks = explode(PHP_EOL,file_get_contents(__DIR__.'/fileList.txt'));
                 usleep(10000);
                 return '';
             }

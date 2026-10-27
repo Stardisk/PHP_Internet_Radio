@@ -26,6 +26,7 @@
                 <p>Last updated: <span class="LastUpdated"><?=$_RESPONSE['LastUpdated']?></span></p>
                 <p>Current Time: <span class="CurrentTime"><?=$_RESPONSE['CurrentTime']?></span></p>
             <?php endif;?>
+            <p>Files in library: <?=$_RESPONSE['FilesInLibrary']?></p>
         </div>
         <div class="block playWrp">
             <div>
@@ -62,7 +63,8 @@
             });
             playButton.onclick = function(){
                 if(!this.classList.contains('stop')){
-                    audio.src = '/radio/?play';
+                    var streamUrl = new URL('?play', location.href);
+                    audio.src = streamUrl.href;
                     this.classList.add('stop');
                     this.textContent = 'Stop';
                     getStatus();
@@ -111,7 +113,7 @@
             }
 
             function getStatus(){
-                xhr.open('GET','/radio/?json');
+                xhr.open('GET','?json');
                 xhr.send();
             }
 

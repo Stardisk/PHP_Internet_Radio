@@ -5,20 +5,23 @@ use Stardisk\Radio\Mp3File;
 
 class test{
     public function __construct($autoConvert = false){
-        header('Content-Type: text/html');
+        header('Content-Type: text/html; charset=UTF-8');
         echo '<style>table {border-collapse: collapse;} tr, td{ border: 1px solid #000;}</style>';
         echo '<table>';
+        echo '<caption>Checks the saved library index. After adding, deleting or moving files, <a href="?refresh">refresh the library</a> first.</caption>';
         echo '<tr>
                 <td>File</td>
-                <td>Bitrate</td>
-                <td>Sampling rate</td>
+                <td>Bitrate (bit/s)</td>
+                <td>Sampling rate (Hz)</td>
                 <td>Has cover</td>';
         if($autoConvert){ echo '<td>Convertion status</td>';}
         echo '</tr>';
 
-        $fileList = explode("\n", file_get_contents('fileList.txt'));
+        $fileList = file(__DIR__.'/fileList.txt', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if($fileList === false){ echo '</table>Cannot read fileList.txt'; return;}
         $wrong = 0; $errors = 0; $errorStyle = 'color: #f00';
         foreach($fileList as $file){
+            $displayFile = htmlspecialchars($file, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
             try{
                 $mp3 = new Mp3File($file, true);
                 $wrongBitrate = false; $wrongRate = false; $hasCover = false;
@@ -29,7 +32,7 @@ class test{
                 if($wrongBitrate or $wrongRate or $hasCover){
                     $wrong++;
                     echo "<tr>
-                            <td>{$file}</td>
+                            <td>{$displayFile}</td>
                             <td style=\"",($wrongBitrate) ? $errorStyle : '',"\">{$mp3->bitRate}</td>
                             <td style=\"",($wrongRate) ? $errorStyle : '',"\">{$mp3->sampleRate}</td>
                             <td style=\"",($hasCover) ? $errorStyle : '',"\">",($hasCover) ? "yes" : "no","</td>";
@@ -42,7 +45,10 @@ class test{
             }
             catch(\Exception $e){
                 $errors++;
-                echo "<tr><td>{$file}</td><td>???</td><td>???</td></tr>";
+                $message = !file_exists($file) ? 'File not found. Refresh the library index.' : $e->getMessage();
+                $message = htmlspecialchars($message, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                $columns = $autoConvert ? 4 : 3;
+                echo "<tr><td>{$displayFile}</td><td colspan=\"{$columns}\" style=\"{$errorStyle}\">{$message}</td></tr>";
             }
         }
         $total = count($fileList);
