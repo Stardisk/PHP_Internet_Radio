@@ -23,6 +23,8 @@ class radio{
     private $intervalBetweenPackets;
     private $actualChunkSize;
 
+    private $prerollSent = false;
+
     private $debug = false;
 
     public function __construct($outside = false){
@@ -38,7 +40,6 @@ class radio{
         $this->forceNextTrack = shmop_open(100005, 'c', 0644, 512);
         $this->radioHistory = shmop_open(100006, 'c', 0644, 1024);
         $this->deleteTrack = shmop_open(100007, 'c', 0644, 2);
-        $this->prerollSent = false;
 
         $this->debug = config::getSetting('debug');
         if(isset($_GET['refresh'])){    $this->refreshTrackList();}

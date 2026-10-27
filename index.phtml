@@ -9,6 +9,10 @@
                 margin: 20px 0;
                 padding: 5px;
             }
+            .playWrp{
+                display: flex;
+                justify-content: space-between;
+            }
         </style>
     </head>
     <body>
@@ -23,9 +27,15 @@
                 <p>Current Time: <span class="CurrentTime"><?=$_RESPONSE['CurrentTime']?></span></p>
             <?php endif;?>
         </div>
-        <div class="block">
-            <button id="play">Play</button>
-            <span class="playing"></span>
+        <div class="block playWrp">
+            <div>
+                <button id="play">Play</button>
+                <span class="playing"></span>
+            </div>
+            <div>
+                <span class="volume"><input type="range" min="0" max="100" value="50"></span>
+            </div>
+
         </div>
         <div class="block">
             <h3>Playing history</h3>
@@ -42,8 +52,10 @@
 
         <script>
             var playButton = document.getElementById('play');
+            var volume = document.querySelector('.volume input');
             var audio = new Audio();
             var updateTimeInterval;
+            audio.volume = 0.5;
             audio.addEventListener('canplay', function(){   this.play();});
             audio.addEventListener('error', function(e){
                 alert('error'); console.log(e); console.log(e.name, e.message); playButton.style.display = '';
@@ -67,6 +79,8 @@
                 }
 
             };
+            volume.oninput = function(){ audio.volume = this.value / 100;};
+
             var xhr = new XMLHttpRequest(), info = document.getElementById('info');
             xhr.onreadystatechange = function(){
                 if(xhr.readyState == 4){
