@@ -5,7 +5,7 @@ use Stardisk\Radio\Mp3File;
 const CHUNK_SIZE = 16384;
 
 class radio{
-    private $nowPlaying;        //какой файл сейчас воспроизводится
+    public $nowPlaying;        //какой файл сейчас воспроизводится
     private $chunkNumber;       //номер чанка этого файла
     private $totalChunks;       //всего чанков в файле
     private $lastUpdate;        //последнее обновление данных в памяти
@@ -14,7 +14,6 @@ class radio{
 
     private $fileList;          //список файлов (используется при обновлении медиатеки)
     public $tracks;             //массив файлов (из него выбираются треки для воспроизведения
-    public $forceNextTrack;     //трек, заданный из телеграм-бота
     public $deleteTrack;        //трек на удаление из телеграм-бота
     private $isMaster = false;  //данный клиент - мастер (может менять треки при их окончании)
     private $withMetadata = false; //клиент запросил метаданные
@@ -37,7 +36,6 @@ class radio{
         $this->lastUpdate = shmop_open(100002, 'c', 0644, 10);
         $this->ID3Title = shmop_open(100003, 'c', 0644, 512);
         $this->totalChunks = shmop_open(100004, 'c', 0644, 4);
-        $this->forceNextTrack = shmop_open(100005, 'c', 0644, 512);
         $this->radioHistory = shmop_open(100006, 'c', 0644, 1024);
         $this->deleteTrack = shmop_open(100007, 'c', 0644, 2);
 
@@ -76,7 +74,10 @@ class radio{
                     }
                     usleep(100000);
                     flush();
-                    $this->play($this->shmopRead($this->forceNextTrack));
+                    $track = '';
+                    while(true){
+                        $track = $this->play($track);
+                    }
                 }
             }
         }
@@ -106,9 +107,9 @@ class radio{
         //если не задан принудительный переход на другой трек
         if(!$nextTrack){
             //проверяем, доиграла ли текущая песня
-            $chunkNumber = $this->shmopRead($this->chunkNumber);
-            $totalChunks = $this->shmopRead($this->totalChunks);
-            $lastUpdate = $this->shmopRead($this->lastUpdate);
+            $chunkNumber = (int)$this->shmopRead($this->chunkNumber);
+            $totalChunks = (int)$this->shmopRead($this->totalChunks);
+            $lastUpdate = (int)$this->shmopRead($this->lastUpdate);
             $time = time();
             //осталось меньше 5 чанков до конца
             if($totalChunks - $chunkNumber < 5){
@@ -129,7 +130,6 @@ class radio{
         //принудительный переход на трек:
         else{
             $selectedMP3 = $nextTrack;
-            $this->shmopWrite($this->forceNextTrack, '');
             $chunkNumber = 0;
         }
         //загружаем данные об этом треке
@@ -178,8 +178,7 @@ class radio{
                 usleep(10000);
                 $this->refreshTrackList(false);
                 usleep(10000);
-                $this->play();
-                return;
+                return '';
             }
 
             if(!$this->prerollSent){
@@ -227,21 +226,18 @@ class radio{
                 if($chunkNumber > 0 and $oneSecSleepAfterChunkNumber > 0 and $chunkNumber % $oneSecSleepAfterChunkNumber == 0){ sleep(2); $exceedSeconds--;}
                 else {usleep($this->intervalBetweenPackets * 1000000);}
                 //если запрошен переход на следующий трек
-                if($nextTrack = $this->shmopRead($this->forceNextTrack)){
+                if($selectedMP3 !== $this->shmopRead($this->nowPlaying)){
                     //закрываем текущий файл и играем запрошенный
                     fclose($fpOrigin);
-                    $this->play($nextTrack);
-                    return;
+                    return $this->shmopRead($this->nowPlaying);
                 }
             }
         }
 
         //дослали файл чанками - закрыли
         fclose($fpOrigin);
-        //если сон после воспроизведения трека больше нуля, то спим это время, т.к. кол-во чанков обычно не равно числу секунд файла и отличается на 3-9
-       // if($exceedSeconds > 0) sleep($exceedSeconds);
         //играем следующий трек
-        $this->play();
+        return '';
     }
 
     //отправка метаданных
