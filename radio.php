@@ -25,6 +25,8 @@ class radio{
     private $prerollSent = false;
 
     private $debug = false;
+    private float $desync = 0.0;             //опережение отправленного аудио относительно реального времени
+    private ?float $lastTimingUpdate = null;
 
     public function __construct($outside = false){
         $this->intervalBetweenPackets = (isset($_GET['i'])) ? (float)($_GET['i']) : 1;
@@ -68,7 +70,7 @@ class radio{
                     header('Pragma: no-cache');
                     header('icy-name: Stardisk PHP Radio Server');
                     header("icy-br: 128");
-                    if(isset($incomingHeaders['icy-metadata'])){
+                    if(isset($incomingHeaders['icy-metadata']) and config::getSetting('metadata')){
                         header ("icy-metaint: ".$this->actualChunkSize*5);
                         $this->withMetadata = true;
                     }
@@ -182,10 +184,17 @@ class radio{
             }
 
             if(!$this->prerollSent){
+                $packetOffset = ftell($fpOrigin);
                 $buffer = fread($fpOrigin, $this->actualChunkSize*5);
+                //Первый блок тоже должен соответствовать объявленному icy-metaint.
+                $bufferLength = strlen($buffer);
+                if($bufferLength < $this->actualChunkSize*5){
+                    $buffer .= str_repeat("\xff", $this->actualChunkSize*5 - $bufferLength);
+                }
                 $chunkNumber+=5;
                 $this->chunkCounter+=5;
                 echo $buffer;
+                $this->recordAudioPacket($mp3file, $packetOffset, strlen($buffer), true);
                 if($this->withMetadata){
                     $debug = ($this->debug) ? ' ('.$chunkNumber.'/'.$this->shmopRead($this->totalChunks).', d: '.floor($mp3file->duration).', s: '.$exceedSeconds.', t: '.$this->chunkCounter.')' : '';
                     $this->setTitle($title.$debug);
@@ -194,7 +203,9 @@ class radio{
             }
             else{
                 //читаем чанк
+                $packetOffset = ftell($fpOrigin);
                 $buffer = fread($fpOrigin, $this->actualChunkSize);
+                $packetLength = strlen($buffer);
                 //увеличиваем счетчики чанков
                 $chunkNumber++; $this->chunkCounter++;
                 //если до конца остается совсем немного чанков
@@ -206,6 +217,7 @@ class radio{
                 }
                 //посылаем чанк клиенту
                 echo $buffer;
+                $this->recordAudioPacket($mp3file, $packetOffset, $packetLength);
                 flush();
                 //если номер чанка кратен 5, обновляем статус на сервере и посылаем метаданные
                 //if($this->chunkCounter % 5 == 0){
@@ -225,6 +237,10 @@ class radio{
                 //спим секунду до отправки следующего чанка
                 if($chunkNumber > 0 and $oneSecSleepAfterChunkNumber > 0 and $chunkNumber % $oneSecSleepAfterChunkNumber == 0){ sleep(2); $exceedSeconds--;}
                 else {usleep($this->intervalBetweenPackets * 1000000);}
+                //Гасим накопленное опережение, сохраняя начальный запас аудио.
+                if($correction = $this->timingCorrection()){
+                    usleep($correction);
+                }
                 //если запрошен переход на следующий трек
                 if($selectedMP3 !== $this->shmopRead($this->nowPlaying)){
                     //закрываем текущий файл и играем запрошенный
@@ -238,6 +254,29 @@ class radio{
         fclose($fpOrigin);
         //играем следующий трек
         return '';
+    }
+
+    //Начисляем длительность только реально отправленной части аудио, без ID3 и добивки чанка.
+    //Для используемого CBR длительность пропорциональна байтам; для VBR это средняя оценка.
+    private function recordAudioPacket(Mp3File $track, int $offset, int $length, bool $preroll = false): void{
+        $audioBytes = max(0, min($offset + $length, $track->audioOffset + $track->audioSize)
+            - max($offset, $track->audioOffset));
+        $seconds = $track->audioSize > 0 ? $audioBytes * $track->duration / $track->audioSize : 0.0;
+        if($this->lastTimingUpdate === null){
+            $this->lastTimingUpdate = hrtime(true) / 1000000000;
+        }
+        //Первоначальный запас остаётся у плеера и не считается рассинхроном.
+        if(!$preroll){ $this->desync += $seconds;}
+    }
+
+    private function timingCorrection(): int{
+        if($this->lastTimingUpdate === null){ return 0;}
+        $now = hrtime(true) / 1000000000;
+        $this->desync -= $now - $this->lastTimingUpdate;
+        $this->lastTimingUpdate = $now;
+        //Реальное время учитывает обычный сон, задержки I/O и предыдущую коррекцию.
+        //Отдельно вычитать 2 после сна нельзя: иначе задержка будет учтена дважды.
+        return $this->desync >= 2.0 ? 2000000 : 0;
     }
 
     //отправка метаданных
