@@ -1,7 +1,7 @@
 <?php
 require_once('config.php');
-require_once('mp3info.php');
-use wapmorgan\Mp3Info\Mp3Info;
+require_once(__DIR__.'/Mp3File.php');
+use Stardisk\Radio\Mp3File;
 
 class test{
     public function __construct($autoConvert = false){
@@ -20,11 +20,11 @@ class test{
         $wrong = 0; $errors = 0; $errorStyle = 'color: #f00';
         foreach($fileList as $file){
             try{
-                $mp3 = new Mp3Info($file, true);
+                $mp3 = new Mp3File($file, true);
                 $wrongBitrate = false; $wrongRate = false; $hasCover = false;
                 if($mp3->bitRate != 128000) { $wrongBitrate = true;}
                 if($mp3->sampleRate != 44100){ $wrongRate = true;}
-                if(count($mp3->coverProperties)>0){ $hasCover = true;}
+                if($mp3->hasCover){ $hasCover = true;}
 
                 if($wrongBitrate or $wrongRate or $hasCover){
                     $wrong++;

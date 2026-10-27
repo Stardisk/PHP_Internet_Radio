@@ -1,7 +1,7 @@
 <?php
-require_once('mp3info.php');
+require_once(__DIR__.'/Mp3File.php');
 require_once('config.php');
-use wapmorgan\Mp3Info\Mp3Info;
+use Stardisk\Radio\Mp3File;
 const CHUNK_SIZE = 16384;
 
 class radio{
@@ -61,7 +61,7 @@ class radio{
                 else{   include('index.phtml');}
             }
             else{
-                $incomingHeaders = getallheaders();
+                $incomingHeaders = array_change_key_case(getallheaders());
                 $this->tracks = explode(PHP_EOL,file_get_contents($_SERVER['DOCUMENT_ROOT'].'/radio/fileList.txt'));
                 if(!$outside){
                     header('Connection: Keep-Alive');
@@ -70,7 +70,7 @@ class radio{
                     header('Pragma: no-cache');
                     header('icy-name: Stardisk PHP Radio Server');
                     header("icy-br: 128");
-                    if(isset($incomingHeaders['Icy-MetaData'])){
+                    if(isset($incomingHeaders['icy-metadata'])){
                         header ("icy-metaint: ".$this->actualChunkSize*5);
                         $this->withMetadata = true;
                     }
@@ -133,17 +133,17 @@ class radio{
             $chunkNumber = 0;
         }
         //загружаем данные об этом треке
-        $mp3file = new Mp3Info($selectedMP3, true);
+        $mp3file = new Mp3File($selectedMP3, true);
         //определяем название песни по ее id3-тегам
-        $song = (isset($mp3file->tags['song'])) ? $mp3file->tags['song'] : '';
-        $artist = (isset($mp3file->tags['artist'])) ? $mp3file->tags['artist'] : '';
+        $song = $mp3file->tags['song'] ?? '';
+        $artist = $mp3file->tags['artist'] ?? '';
         if($song and $artist){ $title = $artist.' - '.$song;}
         else{
             if($locale = config::getSetting('locale')){ setlocale(LC_ALL, $locale);}
             $title = basename($selectedMP3);
         }
         $this->updateHistory($title);
-        $totalChunks = ceil($mp3file->_fileSize / $this->actualChunkSize);              //всего чанков в файле
+        $totalChunks = ceil($mp3file->fileSize / $this->actualChunkSize);              //всего чанков в файле
 
         //открываем файл
         $fpOrigin = fopen($selectedMP3, 'rb');
