@@ -1,4 +1,5 @@
 <?php
+ini_set('display_errors', '1');
 require_once (__DIR__.'/config.php');
 use Stardisk\Radio\Mp3File;
 
@@ -29,6 +30,13 @@ class service{
             case 'test':{
                 new test(($_GET['test'] ?? '') === 'convert');
                 break;
+            }
+            case 'clear_memory':{
+                foreach ([100000,100001,100002,100003,100004,100006,100007] as $i){
+                    $shm = shmop_open($i, 'w', 0, 0);
+                    if($shm){ shmop_delete($shm);}
+                }
+                return 'memory cleared';
             }
             default:{
                 return 'unknown action';
@@ -132,11 +140,11 @@ class test{
         $pathinfo = pathinfo($mp3);
         $newFileName = $pathinfo['dirname'].'/'.$pathinfo['filename'].'_128'.'.mp3';
         $encodingParams = ($removeOnlyCover) ? '-c:a copy' : '-b:a 128k -ar 44100 -ac 2';
-        exec("ffmpeg -i \"$mp3\" $encodingParams -map 0:a \"$newFileName\" -y");
+        exec('ffmpeg -i '.escapeshellarg($mp3).' '.$encodingParams.' -map 0:a '.escapeshellarg($newFileName).' -y', $output, $exitCode);
 
-        if(file_exists($newFileName) and filesize($newFileName) > 0){
-            unlink($mp3); rename($newFileName, $mp3);
-            return true;
+        clearstatcache(true, $newFileName);
+        if($exitCode === 0 and file_exists($newFileName) and filesize($newFileName) > 0){
+            return rename($newFileName, $mp3);
         }
         else{ return false;}
     }

@@ -90,25 +90,26 @@
 
             var xhr = new XMLHttpRequest(), info = document.getElementById('info');
             xhr.onreadystatechange = function(){
-                if(xhr.readyState == 4){
+                if(xhr.readyState === 4){
                     var response = JSON.parse(xhr.responseText);
                     for(var key in response){
-                        if(key == 'History' && response[key]){
-                            var history = document.getElementById('history'), html = '';
+                        if(key === 'History' && response[key]){
+                            var history = document.getElementById('history');
+                            history.innerHTML = '';
                             response[key].forEach(function(historyItem){
-                                html +='<li>'+historyItem+'</li>';
+                                let li = document.createElement('li');
+                                li.textContent = historyItem;
+                                history.appendChild(li);
                             });
-                            history.innerHTML = html;
                         }
                         else{
-                            info.querySelector('.'+key).textContent = response[key];
+                            var div = document.querySelector('.'+key);
+                            if(div) {info.querySelector('.'+key).textContent = response[key];}
                         }
                     }
                 }
-            };
-            if(location.search === '?often'){ setInterval(getStatus, 1000);}
-            else{ setInterval(getStatus, 5000);}
-
+            };            
+            setInterval(getStatus, 5000);
 
             function addZeros(number, lengthWithZeros){
                 var numberAsString = String(number);

@@ -19,7 +19,7 @@ class radio{
     private $withMetadata = false; //клиент запросил метаданные
     private $chunkCounter = 0;  // общий счетчик чанков (для корректной отправки метаданных внутри потока)
 
-    private $intervalBetweenPackets;
+    private $intervalBetweenPackets = 1;
     private $actualChunkSize;
 
     private $prerollSent = false;
@@ -29,8 +29,6 @@ class radio{
     private ?float $lastTimingUpdate = null;
 
     public function __construct($outside = false){
-        $this->intervalBetweenPackets = (isset($_GET['i'])) ? (float)($_GET['i']) : 1;
-
         $this->actualChunkSize = CHUNK_SIZE * $this->intervalBetweenPackets;
 
         $this->nowPlaying = shmop_open(100000, 'c', 0644, 512);
@@ -38,7 +36,7 @@ class radio{
         $this->lastUpdate = shmop_open(100002, 'c', 0644, 10);
         $this->ID3Title = shmop_open(100003, 'c', 0644, 512);
         $this->totalChunks = shmop_open(100004, 'c', 0644, 4);
-        $this->radioHistory = shmop_open(100006, 'c', 0644, 1024);
+        $this->radioHistory = shmop_open(100006, 'c', 0644, 4096);
         $this->deleteTrack = shmop_open(100007, 'c', 0644, 2);
 
         $this->debug = config::getSetting('debug');
@@ -115,10 +113,16 @@ class radio{
             $chunkNumber = 0;
         }
         //загружаем данные об этом треке
-        $mp3file = new Mp3File($selectedMP3, true);
+        try{
+            $mp3file = new Mp3File($selectedMP3, true);
+        }
+        catch(\Throwable $e){
+            error_log('Cannot play track: '.$e->getMessage());
+            exit;
+        }
         //определяем название песни по ее id3-тегам
-        $song = $mp3file->tags['song'] ?? '';
-        $artist = $mp3file->tags['artist'] ?? '';
+        $song = strip_tags($mp3file->tags['song'] ?? '');
+        $artist = strip_tags($mp3file->tags['artist'] ?? '');
         if($song and $artist){ $title = $artist.' - '.$song;}
         else{
             if($locale = config::getSetting('locale')){ setlocale(LC_ALL, $locale);}

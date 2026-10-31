@@ -5,6 +5,7 @@
  * Date: 28.05.22
  * Time: 1:53
  */
+ini_set('display_errors', '1');
 set_time_limit(0);
 
 require_once(__DIR__.'/service.php');
