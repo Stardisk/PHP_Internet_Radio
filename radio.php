@@ -1,6 +1,7 @@
 <?php
 require_once(__DIR__.'/Mp3File.php');
 require_once('config.php');
+require_once(__DIR__.'/service.php');
 use Stardisk\Radio\Mp3File;
 const CHUNK_SIZE = 16384;
 
@@ -12,7 +13,6 @@ class radio{
     private $ID3Title;          //ID3-теги из файла
     private $radioHistory;      //история воспроизведения
 
-    private $fileList;          //список файлов (используется при обновлении медиатеки)
     public $tracks;             //массив файлов (из него выбираются треки для воспроизведения
     public $deleteTrack;        //трек на удаление из телеграм-бота
     private $isMaster = false;  //данный клиент - мастер (может менять треки при их окончании)
@@ -42,70 +42,45 @@ class radio{
         $this->deleteTrack = shmop_open(100007, 'c', 0644, 2);
 
         $this->debug = config::getSetting('debug');
-        if(isset($_GET['refresh'])){    $this->refreshTrackList();}
-        else{
-            if(!isset($_GET['play']) and !$outside){
-                $_RESPONSE['nowPlaying'] = $this->shmopRead($this->ID3Title);
-                $_RESPONSE['History'] = unserialize($this->shmopRead($this->radioHistory));
-                if($this->debug){
-                    $_RESPONSE['File'] = $this->shmopRead($this->nowPlaying);
-                    $_RESPONSE['Chunk'] = $this->shmopRead($this->chunkNumber);
-                    $_RESPONSE['TotalChunks'] = $this->shmopRead($this->totalChunks);
-                    $_RESPONSE['LastUpdated'] = $this->shmopRead($this->lastUpdate);
-                    $_RESPONSE['CurrentTime'] = time();
-                }
-                if(isset($_GET['json'])){
-                    header('Content-type: text/json');
-                    echo json_encode($_RESPONSE); exit;
-                }
-                else{
-                    $_RESPONSE['FilesInLibrary'] = (int)@file_get_contents(__DIR__.'/fileCount.txt');
-                    include('index.phtml');
-                }
+        if(!isset($_GET['play']) and !$outside){
+            $_RESPONSE['nowPlaying'] = $this->shmopRead($this->ID3Title);
+            $_RESPONSE['History'] = unserialize($this->shmopRead($this->radioHistory));
+            if($this->debug){
+                $_RESPONSE['File'] = $this->shmopRead($this->nowPlaying);
+                $_RESPONSE['Chunk'] = $this->shmopRead($this->chunkNumber);
+                $_RESPONSE['TotalChunks'] = $this->shmopRead($this->totalChunks);
+                $_RESPONSE['LastUpdated'] = $this->shmopRead($this->lastUpdate);
+                $_RESPONSE['CurrentTime'] = time();
+            }
+            if(isset($_GET['json'])){
+                header('Content-type: text/json');
+                echo json_encode($_RESPONSE); exit;
             }
             else{
-                $incomingHeaders = array_change_key_case(getallheaders());
-                $this->tracks = explode(PHP_EOL,file_get_contents(__DIR__.'/fileList.txt'));
-                if(!$outside){
-                    header('Connection: Keep-Alive');
-                    header('Content-type: audio/mpeg');
-                    header('Content-Transfer-Encoding: binary');
-                    header('Pragma: no-cache');
-                    header('icy-name: Stardisk PHP Radio Server');
-                    header("icy-br: 128");
-                    if(isset($incomingHeaders['icy-metadata']) and config::getSetting('metadata')){
-                        header ("icy-metaint: ".$this->actualChunkSize*5);
-                        $this->withMetadata = true;
-                    }
-                    usleep(100000);
-                    flush();
-                    $track = '';
-                    while(true){
-                        $track = $this->play($track);
-                    }
-                }
+                $_RESPONSE['FilesInLibrary'] = (int)@file_get_contents(__DIR__.'/fileCount.txt');
+                include('index.phtml');
             }
         }
-    }
-
-    private function refreshTrackList($standalone = true){
-        $this->listFolderFiles(config::getSetting('audioFiles'));
-        $fileList = substr($this->fileList ?? '', 0, -1);
-        file_put_contents('fileList.txt', $fileList);
-        file_put_contents('fileCount.txt', $fileList === '' ? 0 : count(explode(PHP_EOL, $fileList)));
-        if($standalone){ echo 'done'; exit;}
-    }
-
-    private function listFolderFiles($dir){
-        $ffs = scandir($dir);
-        unset($ffs[array_search('.', $ffs, true)]);
-        unset($ffs[array_search('..', $ffs, true)]);
-        // prevent empty ordered elements
-        if (count($ffs) < 1) return;
-        foreach($ffs as $ff){
-            if(is_dir($dir.'/'.$ff)) $this->listFolderFiles($dir.'/'.$ff);
-            else{
-                $this->fileList .= $dir.'/'.$ff.PHP_EOL;
+        else{
+            $incomingHeaders = array_change_key_case(getallheaders());
+            $this->tracks = explode(PHP_EOL,file_get_contents(__DIR__.'/fileList.txt'));
+            if(!$outside){
+                header('Connection: Keep-Alive');
+                header('Content-type: audio/mpeg');
+                header('Content-Transfer-Encoding: binary');
+                header('Pragma: no-cache');
+                header('icy-name: Stardisk PHP Radio Server');
+                header("icy-br: 128");
+                if(isset($incomingHeaders['icy-metadata']) and config::getSetting('metadata')){
+                    header ("icy-metaint: ".$this->actualChunkSize*5);
+                    $this->withMetadata = true;
+                }
+                usleep(100000);
+                flush();
+                $track = '';
+                while(true){
+                    $track = $this->play($track);
+                }
             }
         }
     }
@@ -183,8 +158,9 @@ class radio{
                 usleep(10000);
                 unlink($this->shmopRead($this->nowPlaying));
                 usleep(10000);
-                $this->refreshTrackList(false);
-                $this->tracks = explode(PHP_EOL,file_get_contents(__DIR__.'/fileList.txt'));
+                if(service::action('refresh')){
+                    $this->tracks = explode(PHP_EOL,file_get_contents(__DIR__.'/fileList.txt'));
+                }
                 usleep(10000);
                 return '';
             }

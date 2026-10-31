@@ -17,7 +17,7 @@
     </head>
     <body>
         <h1>Stardisk PHP Radio</h1>
-        <a href="?playlist" download="listen.m3u">Download file for media players</a>
+        <a href="service.php?action=playlist" download="listen.m3u">Download file for media players</a>
         <div class="block" id="info">
             <p>Now playing: <span class="nowPlaying"><?=$_RESPONSE['nowPlaying']?></span></p>
             <?php if($this->debug):?>
@@ -28,6 +28,11 @@
             <?php endif;?>
             <p>Files in library: <?=$_RESPONSE['FilesInLibrary']?></p>
         </div>
+        <?php if(service::isAllowed()):?>
+            <div class="block" id="service">
+                <p><a href="service.php?action=refresh">Refresh library</a> | <a href="service.php?action=test">Test mp3 files</a></p>
+            </div>
+        <?php endif;?>
         <div class="block playWrp">
             <div>
                 <button id="play">Play</button>
