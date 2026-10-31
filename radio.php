@@ -1,33 +1,34 @@
 <?php
-require_once('mp3info.php');
+require_once(__DIR__.'/Mp3File.php');
 require_once('config.php');
-use wapmorgan\Mp3Info\Mp3Info;
+require_once(__DIR__.'/service.php');
+use Stardisk\Radio\Mp3File;
 const CHUNK_SIZE = 16384;
 
 class radio{
-    private $nowPlaying;        //какой файл сейчас воспроизводится
+    public $nowPlaying;        //какой файл сейчас воспроизводится
     private $chunkNumber;       //номер чанка этого файла
     private $totalChunks;       //всего чанков в файле
     private $lastUpdate;        //последнее обновление данных в памяти
     private $ID3Title;          //ID3-теги из файла
     private $radioHistory;      //история воспроизведения
 
-    private $fileList;          //список файлов (используется при обновлении медиатеки)
     public $tracks;             //массив файлов (из него выбираются треки для воспроизведения
-    public $forceNextTrack;     //трек, заданный из телеграм-бота
     public $deleteTrack;        //трек на удаление из телеграм-бота
     private $isMaster = false;  //данный клиент - мастер (может менять треки при их окончании)
     private $withMetadata = false; //клиент запросил метаданные
     private $chunkCounter = 0;  // общий счетчик чанков (для корректной отправки метаданных внутри потока)
 
-    private $intervalBetweenPackets;
+    private $intervalBetweenPackets = 1;
     private $actualChunkSize;
 
+    private $prerollSent = false;
+
     private $debug = false;
+    private float $desync = 0.0;             //опережение отправленного аудио относительно реального времени
+    private ?float $lastTimingUpdate = null;
 
     public function __construct($outside = false){
-        $this->intervalBetweenPackets = (isset($_GET['i'])) ? (float)($_GET['i']) : 1;
-
         $this->actualChunkSize = CHUNK_SIZE * $this->intervalBetweenPackets;
 
         $this->nowPlaying = shmop_open(100000, 'c', 0644, 512);
@@ -35,79 +36,82 @@ class radio{
         $this->lastUpdate = shmop_open(100002, 'c', 0644, 10);
         $this->ID3Title = shmop_open(100003, 'c', 0644, 512);
         $this->totalChunks = shmop_open(100004, 'c', 0644, 4);
-        $this->forceNextTrack = shmop_open(100005, 'c', 0644, 512);
-        $this->radioHistory = shmop_open(100006, 'c', 0644, 1024);
+        $this->radioHistory = shmop_open(100006, 'c', 0644, 4096);
         $this->deleteTrack = shmop_open(100007, 'c', 0644, 2);
-        $this->prerollSent = false;
-
         $this->debug = config::getSetting('debug');
-        if(isset($_GET['refresh'])){    $this->refreshTrackList();}
+
+        if(isset($_GET['events'])){
+            ini_set('zlib.output_compression', '0');
+            header('Content-Type: text/event-stream; charset=utf-8');
+            header('Cache-Control: no-cache');
+            header('X-Accel-Buffering: no');
+            while(ob_get_level() > 0){
+                if(!ob_end_flush()){ break; }
+            }
+            $padding = (config::getSetting('fixEvents')) ? ': '.str_repeat(' ', 8192)."\n\n" : '';
+            while (!connection_aborted()) {
+                $status = $this->collectData();
+                $json = json_encode($status, JSON_UNESCAPED_UNICODE);
+                echo "data: ".$json."\n\n".$padding;
+                flush();
+                sleep(5);
+            }
+            exit;
+        }
+
+        if(!isset($_GET['play']) and !$outside){
+            $_RESPONSE = $this->collectData(true);
+            include('index.phtml');
+            exit(0);
+        }
         else{
-            if(!isset($_GET['play']) and !$outside){
-                $_RESPONSE['nowPlaying'] = $this->shmopRead($this->ID3Title);
-                $_RESPONSE['History'] = unserialize($this->shmopRead($this->radioHistory));
-                if($this->debug){
-                    $_RESPONSE['File'] = $this->shmopRead($this->nowPlaying);
-                    $_RESPONSE['Chunk'] = $this->shmopRead($this->chunkNumber);
-                    $_RESPONSE['TotalChunks'] = $this->shmopRead($this->totalChunks);
-                    $_RESPONSE['LastUpdated'] = $this->shmopRead($this->lastUpdate);
-                    $_RESPONSE['CurrentTime'] = time();
+            $incomingHeaders = array_change_key_case(getallheaders());
+            $this->tracks = explode(PHP_EOL,file_get_contents(__DIR__.'/fileList.txt'));
+            if(!$outside){
+                header('Connection: Keep-Alive');
+                header('Content-type: audio/mpeg');
+                header('Content-Transfer-Encoding: binary');
+                header('Pragma: no-cache');
+                header('icy-name: '.config::getSetting('radioName'));
+                header("icy-br: 128");
+                if(isset($incomingHeaders['icy-metadata']) and config::getSetting('metadata')){
+                    header ("icy-metaint: ".$this->actualChunkSize*5);
+                    $this->withMetadata = true;
                 }
-                if(isset($_GET['json'])){
-                    header('Content-type: text/json');
-                    echo json_encode($_RESPONSE); exit;
-                }
-                else{   include('index.phtml');}
-            }
-            else{
-                $incomingHeaders = getallheaders();
-                $this->tracks = explode(PHP_EOL,file_get_contents($_SERVER['DOCUMENT_ROOT'].'/radio/fileList.txt'));
-                if(!$outside){
-                    header('Connection: Keep-Alive');
-                    header('Content-type: audio/mpeg');
-                    header('Content-Transfer-Encoding: binary');
-                    header('Pragma: no-cache');
-                    header('icy-name: Stardisk PHP Radio Server');
-                    header("icy-br: 128");
-                    if(isset($incomingHeaders['Icy-MetaData'])){
-                        header ("icy-metaint: ".$this->actualChunkSize*5);
-                        $this->withMetadata = true;
-                    }
-                    usleep(100000);
-                    flush();
-                    $this->play($this->shmopRead($this->forceNextTrack));
+                usleep(100000);
+                flush();
+                $track = '';
+                while(true){
+                    $track = $this->play($track);
                 }
             }
         }
     }
 
-    private function refreshTrackList($standalone = true){
-        $this->listFolderFiles(config::getSetting('audioFiles'));
-        file_put_contents('fileList.txt', substr($this->fileList, 0, -1));
-        if($standalone){ echo 'done'; exit;}
-    }
-
-    private function listFolderFiles($dir){
-        $ffs = scandir($dir);
-        unset($ffs[array_search('.', $ffs, true)]);
-        unset($ffs[array_search('..', $ffs, true)]);
-        // prevent empty ordered elements
-        if (count($ffs) < 1) return;
-        foreach($ffs as $ff){
-            if(is_dir($dir.'/'.$ff)) $this->listFolderFiles($dir.'/'.$ff);
-            else{
-                $this->fileList .= $dir.'/'.$ff.PHP_EOL;
-            }
+    private function collectData($withStatic = false){
+        $res = [];
+        $res['nowPlaying'] = $this->shmopRead($this->ID3Title);
+        $res['History'] = unserialize($this->shmopRead($this->radioHistory));
+        if($this->debug){
+            $res['File'] = $this->shmopRead($this->nowPlaying);
+            $res['Chunk'] = $this->shmopRead($this->chunkNumber);
+            $res['TotalChunks'] = $this->shmopRead($this->totalChunks);
+            $res['LastUpdated'] = $this->shmopRead($this->lastUpdate);
+            $res['CurrentTime'] = time();
         }
+        if($withStatic){
+            $res['FilesInLibrary'] = (int)@file_get_contents(__DIR__.'/fileCount.txt');
+        }
+        return $res;
     }
 
     private function play($nextTrack = false){
         //если не задан принудительный переход на другой трек
         if(!$nextTrack){
             //проверяем, доиграла ли текущая песня
-            $chunkNumber = $this->shmopRead($this->chunkNumber);
-            $totalChunks = $this->shmopRead($this->totalChunks);
-            $lastUpdate = $this->shmopRead($this->lastUpdate);
+            $chunkNumber = (int)$this->shmopRead($this->chunkNumber);
+            $totalChunks = (int)$this->shmopRead($this->totalChunks);
+            $lastUpdate = (int)$this->shmopRead($this->lastUpdate);
             $time = time();
             //осталось меньше 5 чанков до конца
             if($totalChunks - $chunkNumber < 5){
@@ -128,21 +132,26 @@ class radio{
         //принудительный переход на трек:
         else{
             $selectedMP3 = $nextTrack;
-            $this->shmopWrite($this->forceNextTrack, '');
             $chunkNumber = 0;
         }
         //загружаем данные об этом треке
-        $mp3file = new Mp3Info($selectedMP3, true);
+        try{
+            $mp3file = new Mp3File($selectedMP3, true);
+        }
+        catch(\Throwable $e){
+            error_log('Cannot play track: '.$e->getMessage());
+            exit;
+        }
         //определяем название песни по ее id3-тегам
-        $song = (isset($mp3file->tags['song'])) ? $mp3file->tags['song'] : '';
-        $artist = (isset($mp3file->tags['artist'])) ? $mp3file->tags['artist'] : '';
+        $song = strip_tags($mp3file->tags['song'] ?? '');
+        $artist = strip_tags($mp3file->tags['artist'] ?? '');
         if($song and $artist){ $title = $artist.' - '.$song;}
         else{
             if($locale = config::getSetting('locale')){ setlocale(LC_ALL, $locale);}
             $title = basename($selectedMP3);
         }
         $this->updateHistory($title);
-        $totalChunks = ceil($mp3file->_fileSize / $this->actualChunkSize);              //всего чанков в файле
+        $totalChunks = ceil($mp3file->fileSize / $this->actualChunkSize);              //всего чанков в файле
 
         //открываем файл
         $fpOrigin = fopen($selectedMP3, 'rb');
@@ -175,17 +184,25 @@ class radio{
                 usleep(10000);
                 unlink($this->shmopRead($this->nowPlaying));
                 usleep(10000);
-                $this->refreshTrackList(false);
+                if(service::action('refresh')){
+                    $this->tracks = explode(PHP_EOL,file_get_contents(__DIR__.'/fileList.txt'));
+                }
                 usleep(10000);
-                $this->play();
-                return;
+                return '';
             }
 
             if(!$this->prerollSent){
+                $packetOffset = ftell($fpOrigin);
                 $buffer = fread($fpOrigin, $this->actualChunkSize*5);
+                //Первый блок тоже должен соответствовать объявленному icy-metaint.
+                $bufferLength = strlen($buffer);
+                if($bufferLength < $this->actualChunkSize*5){
+                    $buffer .= str_repeat("\xff", $this->actualChunkSize*5 - $bufferLength);
+                }
                 $chunkNumber+=5;
                 $this->chunkCounter+=5;
                 echo $buffer;
+                $this->recordAudioPacket($mp3file, $packetOffset, strlen($buffer), true);
                 if($this->withMetadata){
                     $debug = ($this->debug) ? ' ('.$chunkNumber.'/'.$this->shmopRead($this->totalChunks).', d: '.floor($mp3file->duration).', s: '.$exceedSeconds.', t: '.$this->chunkCounter.')' : '';
                     $this->setTitle($title.$debug);
@@ -194,7 +211,9 @@ class radio{
             }
             else{
                 //читаем чанк
+                $packetOffset = ftell($fpOrigin);
                 $buffer = fread($fpOrigin, $this->actualChunkSize);
+                $packetLength = strlen($buffer);
                 //увеличиваем счетчики чанков
                 $chunkNumber++; $this->chunkCounter++;
                 //если до конца остается совсем немного чанков
@@ -206,6 +225,7 @@ class radio{
                 }
                 //посылаем чанк клиенту
                 echo $buffer;
+                $this->recordAudioPacket($mp3file, $packetOffset, $packetLength);
                 flush();
                 //если номер чанка кратен 5, обновляем статус на сервере и посылаем метаданные
                 //if($this->chunkCounter % 5 == 0){
@@ -225,22 +245,46 @@ class radio{
                 //спим секунду до отправки следующего чанка
                 if($chunkNumber > 0 and $oneSecSleepAfterChunkNumber > 0 and $chunkNumber % $oneSecSleepAfterChunkNumber == 0){ sleep(2); $exceedSeconds--;}
                 else {usleep($this->intervalBetweenPackets * 1000000);}
+                //Гасим накопленное опережение, сохраняя начальный запас аудио.
+                if($correction = $this->timingCorrection()){
+                    usleep($correction);
+                }
                 //если запрошен переход на следующий трек
-                if($nextTrack = $this->shmopRead($this->forceNextTrack)){
+                if($selectedMP3 !== $this->shmopRead($this->nowPlaying)){
                     //закрываем текущий файл и играем запрошенный
                     fclose($fpOrigin);
-                    $this->play($nextTrack);
-                    return;
+                    return $this->shmopRead($this->nowPlaying);
                 }
             }
         }
 
         //дослали файл чанками - закрыли
         fclose($fpOrigin);
-        //если сон после воспроизведения трека больше нуля, то спим это время, т.к. кол-во чанков обычно не равно числу секунд файла и отличается на 3-9
-       // if($exceedSeconds > 0) sleep($exceedSeconds);
         //играем следующий трек
-        $this->play();
+        return '';
+    }
+
+    //Начисляем длительность только реально отправленной части аудио, без ID3 и добивки чанка.
+    //Для используемого CBR длительность пропорциональна байтам; для VBR это средняя оценка.
+    private function recordAudioPacket(Mp3File $track, int $offset, int $length, bool $preroll = false): void{
+        $audioBytes = max(0, min($offset + $length, $track->audioOffset + $track->audioSize)
+            - max($offset, $track->audioOffset));
+        $seconds = $track->audioSize > 0 ? $audioBytes * $track->duration / $track->audioSize : 0.0;
+        if($this->lastTimingUpdate === null){
+            $this->lastTimingUpdate = hrtime(true) / 1000000000;
+        }
+        //Первоначальный запас остаётся у плеера и не считается рассинхроном.
+        if(!$preroll){ $this->desync += $seconds;}
+    }
+
+    private function timingCorrection(): int{
+        if($this->lastTimingUpdate === null){ return 0;}
+        $now = hrtime(true) / 1000000000;
+        $this->desync -= $now - $this->lastTimingUpdate;
+        $this->lastTimingUpdate = $now;
+        //Реальное время учитывает обычный сон, задержки I/O и предыдущую коррекцию.
+        //Отдельно вычитать 2 после сна нельзя: иначе задержка будет учтена дважды.
+        return $this->desync >= 2.0 ? 2000000 : 0;
     }
 
     //отправка метаданных

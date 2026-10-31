@@ -1,6 +1,6 @@
 <html>
     <head>
-        <title>Stardisk PHP Radio</title>
+        <title><?=config::getSetting('radioName')?></title>
         <style>
             .block{
                 width: 300px;
@@ -9,11 +9,15 @@
                 margin: 20px 0;
                 padding: 5px;
             }
+            .playWrp{
+                display: flex;
+                justify-content: space-between;
+            }
         </style>
     </head>
     <body>
-        <h1>Stardisk PHP Radio</h1>
-        <a href="?playlist" download="listen.m3u">Download file for media players</a>
+        <h1><?=config::getSetting('radioName')?></h1>
+        <p>Download file for media players: <a href="service.php?action=playlist&type=m3u" download="listen.m3u">m3u</a> | <a href="service.php?action=playlist&type=xspf" download="listen.xspf">xspf</a></p>
         <div class="block" id="info">
             <p>Now playing: <span class="nowPlaying"><?=$_RESPONSE['nowPlaying']?></span></p>
             <?php if($this->debug):?>
@@ -22,10 +26,23 @@
                 <p>Last updated: <span class="LastUpdated"><?=$_RESPONSE['LastUpdated']?></span></p>
                 <p>Current Time: <span class="CurrentTime"><?=$_RESPONSE['CurrentTime']?></span></p>
             <?php endif;?>
+            <p>Files in library: <?=$_RESPONSE['FilesInLibrary']?></p>
         </div>
-        <div class="block">
-            <button id="play">Play</button>
-            <span class="playing"></span>
+        <?php if(service::isAllowed()):?>
+            <div class="block" id="service">
+                <p><a href="service.php?action=refresh">Refresh library</a> | <a href="service.php?action=test">Test mp3 files</a></p>
+                <p><a href="service.php?action=clear_memory">Clear shared memory</a></p>
+            </div>
+        <?php endif;?>
+        <div class="block playWrp">
+            <div>
+                <button id="play">Play</button>
+                <span class="playing"></span>
+            </div>
+            <div>
+                <span class="volume"><input type="range" min="0" max="100" value="50"></span>
+            </div>
+
         </div>
         <div class="block">
             <h3>Playing history</h3>
@@ -42,15 +59,18 @@
 
         <script>
             var playButton = document.getElementById('play');
+            var volume = document.querySelector('.volume input');
             var audio = new Audio();
             var updateTimeInterval;
+            audio.volume = 0.5;
             audio.addEventListener('canplay', function(){   this.play();});
             audio.addEventListener('error', function(e){
                 alert('error'); console.log(e); console.log(e.name, e.message); playButton.style.display = '';
             });
             playButton.onclick = function(){
                 if(!this.classList.contains('stop')){
-                    audio.src = '/radio/?play';
+                    var streamUrl = new URL('?play', location.href);
+                    audio.src = streamUrl.href;
                     this.classList.add('stop');
                     this.textContent = 'Stop';
                     getStatus();
@@ -67,27 +87,28 @@
                 }
 
             };
-            var xhr = new XMLHttpRequest(), info = document.getElementById('info');
-            xhr.onreadystatechange = function(){
-                if(xhr.readyState == 4){
-                    var response = JSON.parse(xhr.responseText);
-                    for(var key in response){
-                        if(key == 'History' && response[key]){
-                            var history = document.getElementById('history'), html = '';
-                            response[key].forEach(function(historyItem){
-                                html +='<li>'+historyItem+'</li>';
-                            });
-                            history.innerHTML = html;
-                        }
-                        else{
-                            info.querySelector('.'+key).textContent = response[key];
-                        }
+            volume.oninput = function(){ audio.volume = this.value / 100;};
+
+            var info = document.getElementById('info');
+            var events = new EventSource('?events');
+            events.onmessage = function(event){
+                var response = JSON.parse(event.data);
+                for(var key in response){
+                    if(key === 'History' && response[key]){
+                        var history = document.getElementById('history');
+                        history.innerHTML = '';
+                        response[key].forEach(function(historyItem){
+                            let li = document.createElement('li');
+                            li.textContent = historyItem;
+                            history.appendChild(li);
+                        });
+                    }
+                    else{
+                        var div = document.querySelector('.'+key);
+                        if(div) {info.querySelector('.'+key).textContent = response[key];}
                     }
                 }
-            };
-            if(location.search === '?often'){ setInterval(getStatus, 1000);}
-            else{ setInterval(getStatus, 5000);}
-
+            }
 
             function addZeros(number, lengthWithZeros){
                 var numberAsString = String(number);
@@ -95,12 +116,6 @@
                 if(requiredZeros > 0){ return '0'.repeat(requiredZeros) + numberAsString;}
                 else{ return numberAsString;}
             }
-
-            function getStatus(){
-                xhr.open('GET','/radio/?json');
-                xhr.send();
-            }
-
         </script>
     </body>
 </html>
