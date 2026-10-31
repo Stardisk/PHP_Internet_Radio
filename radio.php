@@ -67,7 +67,7 @@ class radio{
                 header('Content-type: audio/mpeg');
                 header('Content-Transfer-Encoding: binary');
                 header('Pragma: no-cache');
-                header('icy-name: Stardisk PHP Radio Server');
+                header('icy-name: '.config::getSetting('radioName'));
                 header("icy-br: 128");
                 if(isset($incomingHeaders['icy-metadata']) and config::getSetting('metadata')){
                     header ("icy-metaint: ".$this->actualChunkSize*5);

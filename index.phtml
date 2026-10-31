@@ -1,6 +1,6 @@
 <html>
     <head>
-        <title>Stardisk PHP Radio</title>
+        <title><?=config::getSetting('radioName')?></title>
         <style>
             .block{
                 width: 300px;
@@ -16,8 +16,8 @@
         </style>
     </head>
     <body>
-        <h1>Stardisk PHP Radio</h1>
-        <a href="service.php?action=playlist" download="listen.m3u">Download file for media players</a>
+        <h1><?=config::getSetting('radioName')?></h1>
+        <p>Download file for media players: <a href="service.php?action=playlist&type=m3u" download="listen.m3u">m3u</a> | <a href="service.php?action=playlist&type=xspf" download="listen.xspf">xspf</a></p>
         <div class="block" id="info">
             <p>Now playing: <span class="nowPlaying"><?=$_RESPONSE['nowPlaying']?></span></p>
             <?php if($this->debug):?>
@@ -31,6 +31,7 @@
         <?php if(service::isAllowed()):?>
             <div class="block" id="service">
                 <p><a href="service.php?action=refresh">Refresh library</a> | <a href="service.php?action=test">Test mp3 files</a></p>
+                <p><a href="service.php?action=clear_memory">Clear shared memory</a></p>
             </div>
         <?php endif;?>
         <div class="block playWrp">

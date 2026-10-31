@@ -12,13 +12,41 @@ class service{
     public static function action($action = ''){
         switch ($action){
             case 'playlist':{
+                $type = $_GET['type'] ?? '';
                 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : ($_SERVER['REQUEST_SCHEME'] ?? 'http');
                 $host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'];
                 $path = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME']));
-                $url = $scheme.'://'.$host.rtrim($path, '/').'/?play';
-                header('Content-Disposition: attachment; filename=listen.m3u');
-                header('Content-Type: audio/x-mpegurl; charset=UTF-8');
-                echo "#EXTM3U\n#EXTINF:-1,Stardisk PHP Radio\n".$url."\n";
+                $baseUrl = $scheme.'://'.$host.rtrim($path, '/');
+                $streamURL = $baseUrl.'/?play';
+                switch($type){
+                    case '':
+                    case 'm3u':{
+                        header('Content-Type: audio/x-mpegurl; charset=UTF-8');
+                        header('Content-Disposition: attachment; filename=listen.m3u');
+                        echo "#EXTM3U\n#EXTINF:-1,".config::getSetting('radioName')."\n".$streamURL."\n";
+                        break;
+                    }
+                    case 'xspf':{
+                        if($logo = config::getSetting('logo')){
+                            $logoURL = $baseUrl.'/'.$logo;
+                            $logoHTML = "<image>$logoURL</image>";
+                        }
+                        else{ $logoHTML = '';}
+                        header('Content-Type: application/xspf+xml; charset=UTF-8');
+                        header('Content-Disposition: attachment; filename=listen.xspf');
+                        echo "<playlist version=\"1\" xmlns=\"http://xspf.org/ns/0/\">\n".
+                             "  <trackList>\n".
+                             "    <track>\n".
+                             "      <location>$streamURL</location>\n".
+                             "      <title>".config::getSetting('radioName')."</title>\n".
+                             "      $logoHTML\n".
+                             "    </track>\n".
+                             "  </trackList>\n".
+                             "</playlist>\n";
+                        break;
+                    }
+                }
+
                 exit;
             }
             case 'refresh':{
