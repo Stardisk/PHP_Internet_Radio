@@ -38,26 +38,31 @@ class radio{
         $this->totalChunks = shmop_open(100004, 'c', 0644, 4);
         $this->radioHistory = shmop_open(100006, 'c', 0644, 4096);
         $this->deleteTrack = shmop_open(100007, 'c', 0644, 2);
-
         $this->debug = config::getSetting('debug');
+
+        if(isset($_GET['events'])){
+            ini_set('zlib.output_compression', '0');
+            header('Content-Type: text/event-stream; charset=utf-8');
+            header('Cache-Control: no-cache');
+            header('X-Accel-Buffering: no');
+            while(ob_get_level() > 0){
+                if(!ob_end_flush()){ break; }
+            }
+            $padding = (config::getSetting('fixEvents')) ? ': '.str_repeat(' ', 8192)."\n\n" : '';
+            while (!connection_aborted()) {
+                $status = $this->collectData();
+                $json = json_encode($status, JSON_UNESCAPED_UNICODE);
+                echo "data: ".$json."\n\n".$padding;
+                flush();
+                sleep(5);
+            }
+            exit;
+        }
+
         if(!isset($_GET['play']) and !$outside){
-            $_RESPONSE['nowPlaying'] = $this->shmopRead($this->ID3Title);
-            $_RESPONSE['History'] = unserialize($this->shmopRead($this->radioHistory));
-            if($this->debug){
-                $_RESPONSE['File'] = $this->shmopRead($this->nowPlaying);
-                $_RESPONSE['Chunk'] = $this->shmopRead($this->chunkNumber);
-                $_RESPONSE['TotalChunks'] = $this->shmopRead($this->totalChunks);
-                $_RESPONSE['LastUpdated'] = $this->shmopRead($this->lastUpdate);
-                $_RESPONSE['CurrentTime'] = time();
-            }
-            if(isset($_GET['json'])){
-                header('Content-type: text/json');
-                echo json_encode($_RESPONSE); exit;
-            }
-            else{
-                $_RESPONSE['FilesInLibrary'] = (int)@file_get_contents(__DIR__.'/fileCount.txt');
-                include('index.phtml');
-            }
+            $_RESPONSE = $this->collectData(true);
+            include('index.phtml');
+            exit(0);
         }
         else{
             $incomingHeaders = array_change_key_case(getallheaders());
@@ -81,6 +86,23 @@ class radio{
                 }
             }
         }
+    }
+
+    private function collectData($withStatic = false){
+        $res = [];
+        $res['nowPlaying'] = $this->shmopRead($this->ID3Title);
+        $res['History'] = unserialize($this->shmopRead($this->radioHistory));
+        if($this->debug){
+            $res['File'] = $this->shmopRead($this->nowPlaying);
+            $res['Chunk'] = $this->shmopRead($this->chunkNumber);
+            $res['TotalChunks'] = $this->shmopRead($this->totalChunks);
+            $res['LastUpdated'] = $this->shmopRead($this->lastUpdate);
+            $res['CurrentTime'] = time();
+        }
+        if($withStatic){
+            $res['FilesInLibrary'] = (int)@file_get_contents(__DIR__.'/fileCount.txt');
+        }
+        return $res;
     }
 
     private function play($nextTrack = false){

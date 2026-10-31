@@ -6,7 +6,7 @@ use Stardisk\Radio\Mp3File;
 class service{
 
     public static function isAllowed(){
-        $allowedIPs = config::getSetting('service_ips');
+        $allowedIPs = config::getSetting('serviceIPs');
         return (!$allowedIPs or in_array($_SERVER['REMOTE_ADDR'], $allowedIPs));
     }
     public static function action($action = ''){

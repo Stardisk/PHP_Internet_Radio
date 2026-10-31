@@ -70,9 +70,18 @@ Edit the settings in `config.php`:
 | `metadata` | Enable ICY metadata for players that request it. Set to `false` to send audio without ICY metadata. |
 | `radioName` | Station name shown on the web page, in downloaded playlists and in the `icy-name` response header. |
 | `logo` | Path to the station logo relative to the project directory, for example `logo.png` or `images/logo.png`. Included in XSPF playlists; use an empty string to omit it. |
+| `fixEvents` | Add an SSE comment containing 8 KiB of padding after every status event to work around server buffering without changing server configuration. Enable if updates arrive late in batches; set to `false` when events arrive promptly without padding. Defaults to `true` in the supplied configuration; omitting the setting disables padding. |
 | `service_ips` | IP addresses allowed to refresh or check the library, run conversion and clear shared memory. Compared against `REMOTE_ADDR`. An empty array allows these actions from any IP address. |
 
 Listening and downloading playlists do not require an address in `service_ips`.
+
+The web page receives live status updates through Server-Sent Events (SSE) at
+`?events`. With `fixEvents` enabled, the browser ignores the padding comments,
+but they add approximately 1.6 KiB/s of traffic per open page at the current
+five-second update interval. This workaround fills common server buffers; it
+does not disable buffering or guarantee immediate delivery on every hosting
+provider. After changing `fixEvents`, reload the page to reconnect the event
+stream with the new setting.
 
 With `debug` enabled, track metadata includes values such as
 `123/456, d: 255, s: 4, t: 211`:

@@ -89,28 +89,26 @@
             };
             volume.oninput = function(){ audio.volume = this.value / 100;};
 
-            var xhr = new XMLHttpRequest(), info = document.getElementById('info');
-            xhr.onreadystatechange = function(){
-                if(xhr.readyState === 4){
-                    var response = JSON.parse(xhr.responseText);
-                    for(var key in response){
-                        if(key === 'History' && response[key]){
-                            var history = document.getElementById('history');
-                            history.innerHTML = '';
-                            response[key].forEach(function(historyItem){
-                                let li = document.createElement('li');
-                                li.textContent = historyItem;
-                                history.appendChild(li);
-                            });
-                        }
-                        else{
-                            var div = document.querySelector('.'+key);
-                            if(div) {info.querySelector('.'+key).textContent = response[key];}
-                        }
+            var info = document.getElementById('info');
+            var events = new EventSource('?events');
+            events.onmessage = function(event){
+                var response = JSON.parse(event.data);
+                for(var key in response){
+                    if(key === 'History' && response[key]){
+                        var history = document.getElementById('history');
+                        history.innerHTML = '';
+                        response[key].forEach(function(historyItem){
+                            let li = document.createElement('li');
+                            li.textContent = historyItem;
+                            history.appendChild(li);
+                        });
+                    }
+                    else{
+                        var div = document.querySelector('.'+key);
+                        if(div) {info.querySelector('.'+key).textContent = response[key];}
                     }
                 }
-            };            
-            setInterval(getStatus, 5000);
+            }
 
             function addZeros(number, lengthWithZeros){
                 var numberAsString = String(number);
@@ -118,12 +116,6 @@
                 if(requiredZeros > 0){ return '0'.repeat(requiredZeros) + numberAsString;}
                 else{ return numberAsString;}
             }
-
-            function getStatus(){
-                xhr.open('GET','?json');
-                xhr.send();
-            }
-
         </script>
     </body>
 </html>
